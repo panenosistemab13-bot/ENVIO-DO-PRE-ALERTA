@@ -55,11 +55,11 @@ export default function App() {
 
       console.log("OCR finished. Raw text length:", text.length);
 
-      // Extract numbers (bait numbers are usually 4 to 12 digits)
-      const matches = text.match(/\b\d{4,12}\b/g) || [];
+      // Extract bait numbers (pattern: R followed by digits)
+      const matches = text.match(/R\d+/gi) || [];
       
-      // Clean and unique
-      const extractedNumbers = [...new Set(matches)];
+      // Clean, format to uppercase and unique
+      const extractedNumbers = [...new Set(matches.map(m => m.toUpperCase()))];
       
       if (extractedNumbers.length > 0) {
         const newRows = extractedNumbers.map(num => ({
