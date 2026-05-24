@@ -1,5 +1,6 @@
 {
   "name": "Controle de Embarque de Iscas",
   "description": "Aplicativo de planilha para controle de embarque de iscas, otimizado para dispositivos móveis.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

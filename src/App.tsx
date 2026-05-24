@@ -6,7 +6,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Trash2, Download, Save, FileSpreadsheet, ChevronLeft, ChevronRight, Loader2, ClipboardList, Table, LayoutDashboard, ArrowLeft, Camera, TrendingUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI, Type } from "@google/genai";
 import { RowData, COLUMNS } from './types';
 import PreAlerta from './components/PreAlerta';
 import Stats from './components/Stats';
@@ -58,27 +57,19 @@ export default function App() {
         reader.readAsDataURL(file);
       });
 
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [
-          {
-            parts: [
-              { text: "Extraia todos os números de isca desta imagem. Retorne apenas um array JSON de strings contendo os números encontrados. Exemplo: [\"12345\", \"67890\"]. Se não encontrar nada, retorne um array vazio []." },
-              { inlineData: { data: base64, mimeType: file.type } }
-            ]
-          }
-        ],
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING }
-          }
-        }
+      const response = await fetch('/api/scan-iscas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: base64, mimeType: file.type })
       });
 
-      const extractedNumbers: string[] = JSON.parse(response.text || "[]");
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Erro ao processar imagem no servidor');
+      }
+
+      const data = await response.json();
+      const extractedNumbers: string[] = data.numbers || [];
       
       if (extractedNumbers.length > 0) {
         const newRows = extractedNumbers.map(num => ({
