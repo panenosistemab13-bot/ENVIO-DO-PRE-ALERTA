@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Trash2, Download, Save, FileSpreadsheet, ChevronLeft, ChevronRight, Loader2, ClipboardList, Table, LayoutDashboard, ArrowLeft, Camera, TrendingUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import Tesseract from 'tesseract.js';
 import { RowData, COLUMNS } from './types';
 import PreAlerta from './components/PreAlerta';
 import Stats from './components/Stats';
@@ -48,28 +49,17 @@ export default function App() {
 
     setIsScanning(true);
     try {
-      const base64 = await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const result = reader.result as string;
-          resolve(result.split(',')[1]);
-        };
-        reader.readAsDataURL(file);
+      const { data: { text } } = await Tesseract.recognize(file, 'por', {
+        logger: m => console.log(m.status, (m.progress * 100).toFixed(2) + "%")
       });
 
-      const response = await fetch('/api/scan-iscas', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: base64, mimeType: file.type })
-      });
+      console.log("OCR finished. Raw text length:", text.length);
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Erro ao processar imagem no servidor');
-      }
-
-      const data = await response.json();
-      const extractedNumbers: string[] = data.numbers || [];
+      // Extract numbers (bait numbers are usually 4 to 12 digits)
+      const matches = text.match(/\b\d{4,12}\b/g) || [];
+      
+      // Clean and unique
+      const extractedNumbers = [...new Set(matches)];
       
       if (extractedNumbers.length > 0) {
         const newRows = extractedNumbers.map(num => ({
