@@ -105,14 +105,14 @@ export default function App() {
               ]
             }
           ],
-          model: "openai" // Usando 'openai' ou 'llama' conforme disponibilidade do modelo Vision
+          model: "llama"
         })
       });
 
       if (!response.ok) {
         const errorText = await response.text();
         console.error("API Response Error:", errorText);
-        throw new Error(`Erro na API (${response.status}): ${errorText.substring(0, 50)}...`);
+        throw new Error(`Erro na API (${response.status})`);
       }
       
       const textResponse = await response.text();
