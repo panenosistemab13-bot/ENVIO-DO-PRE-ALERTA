@@ -42,6 +42,7 @@ export default function PreAlerta({ rows, onBack, onGoToMenu }: PreAlertaProps) 
   const [rota, setRota] = useState('SANTA LUZIA/MG x RIO DE JANEIRO/RJ;');
   const [saudacao, setSaudacao] = useState(getGreeting());
   const [selectedGroupKey, setSelectedGroupKey] = useState<string | 'all'>('all');
+  const [searchTerm, setSearchTerm] = useState('');
   
   // Estado para armazenar transportadoras e motoristas por cavalo
   const [transportadoras, setTransportadoras] = useState<Record<string, string>>(() => {
@@ -444,6 +445,14 @@ Observação Importante: Algumas imagens são rotuladas como "IMAGEM ILUSTRATIVA
     ...(Object.entries(manualGroups) as [string, GroupData][])
   ];
 
+  const filteredGroups = groups.filter(([_, data]) => {
+    if (!searchTerm) return true;
+    const search = searchTerm.toLowerCase().trim();
+    const cavaloMatch = data.cavalo?.toLowerCase().includes(search);
+    const iscaMatch = data.iscas.some(isca => isca?.toLowerCase().includes(search));
+    return cavaloMatch || iscaMatch;
+  });
+
   return (
     <div className="flex-1 min-h-screen bg-gray-50 flex flex-col font-sans text-gray-900">
       {/* Header / Toolbar */}
@@ -475,8 +484,29 @@ Observação Importante: Algumas imagens são rotuladas como "IMAGEM ILUSTRATIVA
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         {/* Sidebar Selector */}
         <aside className="w-full lg:w-80 bg-white border-r border-gray-200 overflow-y-auto no-print p-4 flex flex-col gap-4">
-          <div className="px-2 flex flex-col gap-2">
-            <h2 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-2">Lista de Documentos</h2>
+          <div className="px-2 flex flex-col gap-4">
+            <h2 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-0">Pesquisar Documentos</h2>
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Placa ou Nº Isca..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 text-xs font-bold focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none"
+              />
+              {searchTerm && (
+                <button 
+                  onClick={() => setSearchTerm('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
+            </div>
+
+            <div className="h-px bg-gray-100 my-2"></div>
+
+            <h2 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Lista de Documentos</h2>
             <button
               onClick={() => setSelectedGroupKey('all')}
               className={`w-full text-left p-4 rounded-2xl transition-all flex items-center justify-between group ${
@@ -505,7 +535,7 @@ Observação Importante: Algumas imagens são rotuladas como "IMAGEM ILUSTRATIVA
           </div>
 
           <div className="flex flex-col gap-2">
-            {groups.map(([key, data]) => (
+            {filteredGroups.map(([key, data]) => (
               <button
                 key={key}
                 onClick={() => setSelectedGroupKey(key)}
@@ -578,7 +608,7 @@ Observação Importante: Algumas imagens são rotuladas como "IMAGEM ILUSTRATIVA
 
             {/* Documents */}
             <div id="pre-alerta-table" className="space-y-12">
-              {groups
+              {filteredGroups
                 .filter(([key]) => selectedGroupKey === 'all' || selectedGroupKey === key)
                 .map(([key, data], index) => (
                 <motion.div 

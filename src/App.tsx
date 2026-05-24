@@ -4,11 +4,12 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, Download, Save, FileSpreadsheet, ChevronLeft, ChevronRight, Loader2, ClipboardList, Table, LayoutDashboard, ArrowLeft, Camera } from 'lucide-react';
+import { Plus, Trash2, Download, Save, FileSpreadsheet, ChevronLeft, ChevronRight, Loader2, ClipboardList, Table, LayoutDashboard, ArrowLeft, Camera, TrendingUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI, Type } from "@google/genai";
 import { RowData, COLUMNS } from './types';
 import PreAlerta from './components/PreAlerta';
+import Stats from './components/Stats';
 
 const INITIAL_ROWS_COUNT = 10;
 
@@ -38,7 +39,7 @@ export default function App() {
   const [rows, setRows] = useState<RowData[]>([]);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isScanning, setIsScanning] = useState(false);
-  const [currentView, setCurrentView] = useState<'menu' | 'main' | 'pre-alerta'>('menu');
+  const [currentView, setCurrentView] = useState<'menu' | 'main' | 'pre-alerta' | 'stats'>('menu');
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -89,6 +90,7 @@ export default function App() {
         const updatedRows = [...newRows, ...rows];
         setRows(updatedRows);
         saveToLocalStorage(updatedRows);
+        setCurrentView('main');
       } else {
         alert("Nenhum número de isca foi encontrado na imagem.");
       }
@@ -259,7 +261,43 @@ export default function App() {
   if (currentView === 'menu') {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col font-sans text-gray-900">
-        <header className="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center sticky top-0 z-10 shadow-sm">
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleImageUpload}
+        accept="image/*"
+        className="hidden"
+      />
+
+      <AnimatePresence>
+        {isScanning && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6 text-center"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="bg-white p-8 rounded-3xl shadow-2xl max-w-sm w-full flex flex-col items-center"
+            >
+              <div className="relative mb-6">
+                <div className="absolute inset-0 bg-blue-500/20 rounded-full animate-ping" />
+                <div className="relative bg-blue-600 rounded-full p-4 text-white">
+                  <Loader2 className="animate-spin" size={32} />
+                </div>
+              </div>
+              <h3 className="text-xl font-black text-gray-900 mb-2 uppercase">Escaneando Prancheta</h3>
+              <p className="text-sm font-bold text-gray-500 leading-relaxed">
+                Nossa IA está analisando a imagem para extrair os números das iscas automaticamente. Aguarde um instante...
+              </p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <header className="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center sticky top-0 z-10 shadow-sm">
           <div className="flex items-center gap-3">
             <div className="bg-blue-600 p-2 rounded-lg text-white shadow-lg shadow-blue-200">
               <FileSpreadsheet size={24} />
@@ -307,10 +345,7 @@ export default function App() {
             <motion.button
               whileHover={{ scale: 1.02, translateY: -4 }}
               whileTap={{ scale: 0.98 }}
-              onClick={() => {
-                setCurrentView('main');
-                setTimeout(() => fileInputRef.current?.click(), 100);
-              }}
+              onClick={() => fileInputRef.current?.click()}
               className="bg-white p-8 rounded-2xl border border-gray-100 shadow-xl shadow-gray-200/50 flex flex-col items-center text-center group transition-all hover:border-purple-500"
             >
               <div className="w-20 h-20 bg-purple-50 text-purple-600 rounded-2xl flex items-center justify-center mb-6 group-hover:bg-purple-600 group-hover:text-white transition-colors shadow-inner">
@@ -323,13 +358,14 @@ export default function App() {
             <motion.button
               whileHover={{ scale: 1.02, translateY: -4 }}
               whileTap={{ scale: 0.98 }}
-              className="bg-white p-8 rounded-2xl border border-gray-100 shadow-xl shadow-gray-200/50 flex flex-col items-center text-center group transition-all hover:border-gray-900 opacity-60 cursor-not-allowed"
+              onClick={() => setCurrentView('stats')}
+              className="bg-white p-8 rounded-2xl border border-gray-100 shadow-xl shadow-gray-200/50 flex flex-col items-center text-center group transition-all hover:border-gray-900 shadow-emerald-100"
             >
-              <div className="w-20 h-20 bg-gray-50 text-gray-400 rounded-2xl flex items-center justify-center mb-6 shadow-inner">
-                <Save size={40} strokeWidth={2.5} />
+              <div className="w-20 h-20 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mb-6 group-hover:bg-emerald-600 group-hover:text-white transition-colors shadow-inner">
+                <TrendingUp size={40} strokeWidth={2.5} />
               </div>
-              <h2 className="text-2xl font-black mb-2 text-gray-400 uppercase">Relatórios</h2>
-              <p className="text-sm font-bold text-gray-400 leading-relaxed">Em breve: Visualize estatísticas e histórico de embarques realizados.</p>
+              <h2 className="text-2xl font-black mb-2 text-gray-900 uppercase">Relatórios</h2>
+              <p className="text-sm font-bold text-gray-500 leading-relaxed">Visualize estatísticas, volumes e resumo financeiro dos embarques realizados.</p>
             </motion.button>
 
           </div>
@@ -344,6 +380,10 @@ export default function App() {
 
   if (currentView === 'pre-alerta') {
     return <PreAlerta rows={rows} onBack={() => setCurrentView('main')} onGoToMenu={() => setCurrentView('menu')} clearAllRows={clearAll} />;
+  }
+
+  if (currentView === 'stats') {
+    return <Stats rows={rows} onBack={() => setCurrentView('menu')} />;
   }
 
   return (
@@ -371,6 +411,20 @@ export default function App() {
           
           <div className="flex items-center gap-2 overflow-x-auto pb-1 w-full md:w-auto justify-center md:justify-end">
 
+
+            <button 
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md transition-colors text-sm font-medium whitespace-nowrap"
+            >
+              <Camera size={16} /> Escanear
+            </button>
+
+            <button 
+              onClick={() => setCurrentView('stats')}
+              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-md transition-colors text-sm font-medium whitespace-nowrap"
+            >
+              <TrendingUp size={16} /> Relatórios
+            </button>
 
             <button 
               onClick={() => setCurrentView('pre-alerta')}
