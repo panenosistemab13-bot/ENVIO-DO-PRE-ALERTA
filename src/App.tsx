@@ -89,7 +89,7 @@ export default function App() {
       const resizedBase64Full = await resizeImage(file);
       const base64 = resizedBase64Full.split(',')[1];
 
-      const response = await fetch('https://text.pollinations.ai/', {
+      const response = await fetch('https://text.pollinations.ai/openai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -105,7 +105,7 @@ export default function App() {
               ]
             }
           ],
-          model: "llama"
+          model: "p1"
         })
       });
 
