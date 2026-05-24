@@ -6,7 +6,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Trash2, Download, Save, FileSpreadsheet, ChevronLeft, ChevronRight, Loader2, ClipboardList, Table, LayoutDashboard, ArrowLeft, Camera, TrendingUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import Tesseract from 'tesseract.js';
 import { RowData, COLUMNS } from './types';
 import PreAlerta from './components/PreAlerta';
 import Stats from './components/Stats';
@@ -49,35 +48,111 @@ export default function App() {
 
     setIsScanning(true);
     try {
-      const { data: { text } } = await Tesseract.recognize(file, 'por', {
-        logger: m => console.log(m.status, (m.progress * 100).toFixed(2) + "%")
+      // 1. Redimensionar a imagem para otimizar o envio
+      const resizeImage = (file: File): Promise<string> => {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => {
+              const canvas = document.createElement('canvas');
+              let width = img.width;
+              let height = img.height;
+              const maxDimension = 1200;
+
+              if (width > height) {
+                if (width > maxDimension) {
+                  height *= maxDimension / width;
+                  width = maxDimension;
+                }
+              } else {
+                if (height > maxDimension) {
+                  width *= maxDimension / height;
+                  height = maxDimension;
+                }
+              }
+
+              canvas.width = width;
+              canvas.height = height;
+              const ctx = canvas.getContext('2d');
+              ctx?.drawImage(img, 0, 0, width, height);
+              resolve(canvas.toDataURL('image/jpeg', 0.7));
+            };
+            img.onerror = reject;
+            img.src = e.target?.result as string;
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+      };
+
+      const resizedBase64Full = await resizeImage(file);
+      const base64 = resizedBase64Full.split(',')[1];
+
+      const response = await fetch('https://text.pollinations.ai/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [
+            {
+              role: "user",
+              content: [
+                { 
+                  type: 'text', 
+                  text: "Você é um assistente de logística especialista em OCR. Analise esta imagem manuscrita (uma prancheta de controle de embarque) e extraia os dados de todas as colunas preenchidas. As colunas esperadas são: Nº Isca (sempre começa com R), Data, Hora, Doca, Cavalo, Carreta, M³, Destino, Nº NF, Responsável e Produto. Retorne APENAS um array JSON puro de objetos com as seguintes chaves (se o dado não existir, retorne string vazia): iscaNo, data, hora, doca, cavalo, carreta, m3, destino, nfNo, responsavel, produto. Exemplo: [{\"iscaNo\": \"R123\", \"doca\": \"04\", ...}]. Não inclua explicações, apenas o JSON puro." 
+                },
+                { type: 'image_url', image_url: { url: resizedBase64Full } }
+              ]
+            }
+          ],
+          model: "openai" // Usando 'openai' ou 'llama' conforme disponibilidade do modelo Vision
+        })
       });
 
-      console.log("OCR finished. Raw text length:", text.length);
-
-      // Extract bait numbers (pattern: R followed by digits)
-      const matches = text.match(/R\d+/gi) || [];
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("API Response Error:", errorText);
+        throw new Error(`Erro na API (${response.status}): ${errorText.substring(0, 50)}...`);
+      }
       
-      // Clean, format to uppercase and unique
-      const extractedNumbers = [...new Set(matches.map(m => m.toUpperCase()))];
+      const textResponse = await response.text();
+      // Limpeza de possíveis blocos de código markdown
+      const cleanedJson = textResponse.replace(/```json/g, '').replace(/```/g, '').trim();
       
-      if (extractedNumbers.length > 0) {
-        const newRows = extractedNumbers.map(num => ({
+      let extractedData: any[] = [];
+      try {
+        extractedData = JSON.parse(cleanedJson);
+      } catch (e) {
+        console.error("Erro ao parsear JSON da IA:", textResponse);
+        // Fallback: Tenta encontrar o JSON dentro do texto se houver lixo em volta
+        const jsonMatch = cleanedJson.match(/\[\s*\{.*\}\s*\]/s);
+        if (jsonMatch) {
+          try {
+            extractedData = JSON.parse(jsonMatch[0]);
+          } catch {
+            alert("Não foi possível processar a resposta da IA de forma estruturada.");
+          }
+        }
+      }
+      
+      if (Array.isArray(extractedData) && extractedData.length > 0) {
+        const newRows = extractedData.map(item => ({
           ...createEmptyRow(),
-          iscaNo: num
+          ...item,
+          iscaNo: (item.iscaNo || '').toString().toUpperCase(),
+          id: crypto.randomUUID()
         }));
         
-        // Adiciona os novos números no topo ou preenche linhas vazias
         const updatedRows = [...newRows, ...rows];
         setRows(updatedRows);
         saveToLocalStorage(updatedRows);
         setCurrentView('main');
       } else {
-        alert("Nenhum número de isca foi encontrado na imagem.");
+        alert("Nenhum dado legível foi encontrado na imagem da prancheta.");
       }
     } catch (error) {
       console.error("Erro ao escanear imagem:", error);
-      alert("Erro ao processar a imagem. Verifique sua conexão e tente novamente.");
+      alert("Erro ao processar a imagem com IA. Verifique sua conexão e tente novamente.");
     } finally {
       setIsScanning(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
