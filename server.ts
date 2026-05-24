@@ -1,7 +1,7 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI } from "@google/genai";
+import Tesseract from "tesseract.js";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -11,48 +11,44 @@ async function startServer() {
   const PORT = 3000;
 
   // Middleware for parsing JSON with a limit for images
-  app.use(express.json({ limit: "10mb" }));
+  app.use(express.json({ limit: "15mb" }));
 
   // API routes
   app.post("/api/scan-iscas", async (req, res) => {
     try {
-      const { image, mimeType } = req.body;
-      const apiKey = process.env.GEMINI_API_KEY;
-
-      if (!apiKey) {
-        return res.status(500).json({ error: "GEMINI_API_KEY is not configured on the server." });
-      }
+      const { image } = req.body;
 
       if (!image) {
         return res.status(400).json({ error: "Image data is required." });
       }
 
-      const ai = new GoogleGenAI(apiKey);
-      const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" }); // Using a more standard stable alias
+      // Convert base64 to buffer
+      // The frontend sends base64 with data:image/... prefix sometimes, 
+      // but let's assume it's just the base64 string or handle both.
+      const base64Data = image.includes(",") ? image.split(",")[1] : image;
+      const imageBuffer = Buffer.from(base64Data, "base64");
 
-      const prompt = "Extraia todos os números de isca desta imagem. Retorne apenas um array JSON de strings contendo os números encontrados. Exemplo: [\"12345\", \"67890\"]. Se não encontrar nada, retorne um array vazio [].";
-
-      const result = await model.generateContent([
-        { text: prompt },
-        { inlineData: { data: image, mimeType: mimeType || "image/jpeg" } }
-      ]);
-
-      const responseText = result.response.text();
-      // Clean up response text in case Gemini adds markdown blocks
-      const cleanedJson = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
+      console.log("Starting OCR with Tesseract...");
       
-      let extractedNumbers: string[] = [];
-      try {
-        extractedNumbers = JSON.parse(cleanedJson);
-      } catch (e) {
-        console.error("Failed to parse Gemini response as JSON:", cleanedJson);
-        // Fallback or handle error
-      }
+      // Perform OCR
+      const { data: { text } } = await Tesseract.recognize(imageBuffer, 'por', {
+        logger: m => console.log(m.status, (m.progress * 100).toFixed(2) + "%")
+      });
+
+      console.log("OCR finished. Raw text length:", text.length);
+
+      // Extract numbers (bait numbers are usually 4 to 12 digits)
+      const matches = text.match(/\b\d{4,12}\b/g) || [];
+      
+      // Clean and unique
+      const extractedNumbers = [...new Set(matches)];
+
+      console.log("Extracted numbers:", extractedNumbers);
 
       res.json({ numbers: extractedNumbers });
     } catch (error: any) {
-      console.error("Error calling Gemini API:", error);
-      res.status(500).json({ error: error.message || "Internal Server Error" });
+      console.error("Error performing OCR:", error);
+      res.status(500).json({ error: "Erro ao processar imagem (OCR). Certifique-se de que a imagem está legível." });
     }
   });
 
