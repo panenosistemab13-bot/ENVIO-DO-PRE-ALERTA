@@ -49,31 +49,97 @@ export default function App() {
 
     setIsScanning(true);
     try {
-      const { data: { text } } = await Tesseract.recognize(file, 'por', {
+      const { data } = await Tesseract.recognize(file, 'por', {
         logger: m => console.log(m.status, (m.progress * 100).toFixed(2) + "%")
       });
-
+      
+      const text = data.text;
       console.log("OCR finished. Raw text length:", text.length);
 
-      // Extract numbers (bait numbers are usually 4 to 12 digits)
-      const matches = text.match(/\b\d{4,12}\b/g) || [];
-      
-      // Clean and unique
-      const extractedNumbers = [...new Set(matches)];
-      
-      if (extractedNumbers.length > 0) {
-        const newRows = extractedNumbers.map(num => ({
-          ...createEmptyRow(),
-          iscaNo: num
-        }));
+      // Tentar processar por linhas para capturar dados relacionados
+      const lines = text.split('\n').filter(l => l.trim().length > 0);
+      const extractedRows: RowData[] = [];
+
+      lines.forEach(line => {
+        // Busca por número de isca (principal identificador)
+        const iscaMatch = line.match(/\b\d{4,12}\b/);
+        if (iscaMatch) {
+          const row = createEmptyRow();
+          row.iscaNo = iscaMatch[0];
+          
+          // Tentar extrair Placas (Cavalo/Carreta) - Formato Mercosul ou Antigo
+          const plateMatches = line.match(/[A-Z]{3}-?\d[A-Z\d]\d{2}/gi);
+          if (plateMatches && plateMatches.length >= 1) {
+            row.cavalo = plateMatches[0].toUpperCase().replace(/-/g, '');
+            if (plateMatches.length >= 2) {
+              row.carreta = plateMatches[1].toUpperCase().replace(/-/g, '');
+            }
+          }
+
+          // Tentar extrair Doca (procurando por "Doca" ou números isolados pequenos)
+          const docaMatch = line.match(/doca[:\s]*(\d{1,2})/i);
+          if (docaMatch) {
+            row.doca = docaMatch[1].padStart(2, '0');
+          }
+
+          // Tentar extrair NF (procurando por "NF" ou números de ~6 a 9 dígitos)
+          const nfMatch = line.match(/nf[:\s]*(\d{5,9})/i);
+          if (nfMatch) {
+            row.nfNo = nfMatch[1];
+          }
+
+          // Tentar extrair PRÉ-ALERTA GR (nomes comuns)
+          const grNames = ['jeff', 'vini', 'douglas', 'ulisses', 'pedro', 'rayson'];
+          for (const name of grNames) {
+            if (line.toLowerCase().includes(name)) {
+              row.preAlertaGr = name.charAt(0).toUpperCase() + name.slice(1);
+              break;
+            }
+          }
+
+          // Tentar extrair UMA (procurando por sequências longas pontuadas)
+          const umaMatch = line.match(/\d{3}\.\d{3}\.\d{3}\.\d{3}/) || line.match(/\d{12}/);
+          if (umaMatch) {
+            row.uma = umaMatch[0];
+          }
+
+          // Data e Hora se houver na linha
+          const dateMatch = line.match(/\d{2}\/\d{2}/);
+          if (dateMatch) row.data = dateMatch[0];
+          const timeMatch = line.match(/\d{2}:\d{2}/);
+          if (timeMatch) row.hora = timeMatch[0];
+
+          extractedRows.push(row);
+        }
+      });
+
+      // Se não encontrou nada estruturado por linha, tenta a busca global anterior para iscas
+      if (extractedRows.length === 0) {
+        const matches = text.match(/\b\d{4,12}\b/g) || [];
+        const extractedNumbers = [...new Set(matches)];
         
-        // Adiciona os novos números no topo ou preenche linhas vazias
-        const updatedRows = [...newRows, ...rows];
+        if (extractedNumbers.length > 0) {
+          extractedNumbers.forEach(num => {
+            const row = createEmptyRow();
+            row.iscaNo = num;
+            extractedRows.push(row);
+          });
+        }
+      }
+      
+      if (extractedRows.length > 0) {
+        // Remove linhas iniciais se forem as 10 vazias padrão e o usuário está começando agora
+        let baseRows = rows;
+        if (rows.length === INITIAL_ROWS_COUNT && rows.every(r => !r.iscaNo && !r.cavalo)) {
+          baseRows = [];
+        }
+
+        const updatedRows = [...extractedRows, ...baseRows];
         setRows(updatedRows);
         saveToLocalStorage(updatedRows);
         setCurrentView('main');
       } else {
-        alert("Nenhum número de isca foi encontrado na imagem.");
+        alert("Nenhum dado legível foi encontrado na imagem. Tente tirar a foto mais de perto e com boa iluminação.");
       }
     } catch (error) {
       console.error("Erro ao escanear imagem:", error);
@@ -391,29 +457,6 @@ export default function App() {
           </div>
           
           <div className="flex items-center gap-2 overflow-x-auto pb-1 w-full md:w-auto justify-center md:justify-end">
-
-
-            <button 
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md transition-colors text-sm font-medium whitespace-nowrap"
-            >
-              <Camera size={16} /> Escanear
-            </button>
-
-            <button 
-              onClick={() => setCurrentView('stats')}
-              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-md transition-colors text-sm font-medium whitespace-nowrap"
-            >
-              <TrendingUp size={16} /> Relatórios
-            </button>
-
-            <button 
-              onClick={() => setCurrentView('pre-alerta')}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md transition-colors text-sm font-medium whitespace-nowrap"
-            >
-              <ClipboardList size={16} /> Pré-Alerta
-            </button>
-
             <button 
               onClick={addRow}
               className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md transition-colors text-sm font-medium whitespace-nowrap"
