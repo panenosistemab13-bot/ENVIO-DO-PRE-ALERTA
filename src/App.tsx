@@ -391,29 +391,6 @@ export default function App() {
           </div>
           
           <div className="flex items-center gap-2 overflow-x-auto pb-1 w-full md:w-auto justify-center md:justify-end">
-
-
-            <button 
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md transition-colors text-sm font-medium whitespace-nowrap"
-            >
-              <Camera size={16} /> Escanear
-            </button>
-
-            <button 
-              onClick={() => setCurrentView('stats')}
-              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-md transition-colors text-sm font-medium whitespace-nowrap"
-            >
-              <TrendingUp size={16} /> Relatórios
-            </button>
-
-            <button 
-              onClick={() => setCurrentView('pre-alerta')}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md transition-colors text-sm font-medium whitespace-nowrap"
-            >
-              <ClipboardList size={16} /> Pré-Alerta
-            </button>
-
             <button 
               onClick={addRow}
               className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md transition-colors text-sm font-medium whitespace-nowrap"
