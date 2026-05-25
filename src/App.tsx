@@ -6,7 +6,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Trash2, Download, Save, FileSpreadsheet, ChevronLeft, ChevronRight, Loader2, ClipboardList, Table, LayoutDashboard, ArrowLeft, Camera, TrendingUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import Tesseract from 'tesseract.js';
 import { RowData, COLUMNS } from './types';
 import PreAlerta from './components/PreAlerta';
 import Stats from './components/Stats';
@@ -43,119 +42,77 @@ export default function App() {
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const sliceImage = (imageFile: File, slicesCount: number): Promise<string[]> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error("Não foi possível obter o contexto do canvas"));
+          return;
+        }
+
+        // Fatiamento horizontal
+        const sliceHeight = img.height / slicesCount;
+        const slices: string[] = [];
+
+        canvas.width = img.width;
+        canvas.height = sliceHeight;
+
+        for (let i = 0; i < slicesCount; i++) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(
+            img,
+            0, i * sliceHeight, img.width, sliceHeight, // Source
+            0, 0, img.width, sliceHeight             // Destination
+          );
+          // Converter para base64 (removendo prefixo para a API)
+          const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+          slices.push(base64);
+        }
+        resolve(slices);
+      };
+      img.onerror = () => reject(new Error("Erro ao carregar imagem"));
+      img.src = URL.createObjectURL(imageFile);
+    });
+  };
+
+  const processOcrSlice = async (base64Image: string): Promise<RowData[]> => {
+    const response = await fetch('/api/ocr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: base64Image })
+    });
+    if (!response.ok) throw new Error("Erro na resposta da API de OCR");
+    const data = await response.json();
+    return data.map((item: any) => ({
+      ...createEmptyRow(),
+      ...item,
+      id: Math.random().toString(36).substring(2, 9)
+    }));
+  };
+
   const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
     setIsScanning(true);
     try {
-      const { data } = await Tesseract.recognize(file, 'por', {
-        logger: m => console.log(m.status, (m.progress * 100).toFixed(2) + "%")
-      });
+      // Fatiar a imagem em 3 partes conforme solicitado pelo usuário para melhor resolução
+      console.log("Slicing image...");
+      const slices = await sliceImage(file, 3);
       
-      const text = data.text;
-      console.log("OCR finished. Raw text length:", text.length);
-
-      // Tentar processar por linhas para capturar dados relacionados
-      const lines = text.split('\n').filter(l => l.trim().length > 0);
-      const extractedRows: RowData[] = [];
-
-      lines.forEach(line => {
-        // Busca por número de isca (principal identificador) - Ex: R100000876 ou 100000876
-        const iscaMatch = line.match(/\b[R]?\d{7,12}\b/i);
-        if (iscaMatch) {
-          const row = createEmptyRow();
-          row.iscaNo = iscaMatch[0].toUpperCase();
-          
-          // Tentar extrair Placas (Cavalo/Carreta) - Formato Mercosul ou Antigo
-          // Ex: RYB7G26, MEM4453, ABC-1234
-          const plateMatches = line.match(/[A-Z]{3}-?\d[A-Z\d]\d{2}/gi) || line.match(/[A-Z]{3}-?\d{4}/gi);
-          if (plateMatches && plateMatches.length >= 1) {
-            row.cavalo = plateMatches[0].toUpperCase().replace(/-/g, '');
-            if (plateMatches.length >= 2) {
-              row.carreta = plateMatches[1].toUpperCase().replace(/-/g, '');
-            }
-          }
-
-          // Tentar extrair Doca (procurando por "Doca" ou números isolados pequenos de 2 dígitos)
-          const docaMatch = line.match(/doca[:\s]*(\d{1,2})/i) || line.match(/\b\d{1,2}\b/);
-          if (docaMatch && !line.includes(docaMatch[0] + '/')) { // Evita pegar parte da data
-            row.doca = docaMatch[1] ? docaMatch[1].padStart(2, '0') : docaMatch[0].padStart(2, '0');
-          }
-
-          // Tentar extrair NF (procurando por números de 7 dígitos próximos a "NF" ou isolados)
-          const nfMatch = line.match(/nf[:\s]*(\d{5,9})/i) || line.match(/\b\d{7}\b/);
-          if (nfMatch) {
-            row.nfNo = nfMatch[1] || nfMatch[0];
-          }
-
-          // Tentar extrair Produto (8 dígitos)
-          const produtoMatch = line.match(/\b\d{8}\b/);
-          if (produtoMatch && produtoMatch[0] !== row.nfNo) {
-            row.produto = produtoMatch[0];
-          }
-
-          // Tentar extrair UMA (sequências longas ou com espaços/pontos)
-          const umaMatch = line.match(/\d{2,3}[\s.]\d{3}[\s.]\d{3}[\s.]\d{3}/) || line.match(/\b\d{10,12}\b/);
-          if (umaMatch) {
-            row.uma = umaMatch[0].replace(/\s/g, '.');
-          }
-
-          // Tentar extrair M³ (geralmente 3 dígitos)
-          const m3Match = line.match(/\b\d{3}\b/);
-          if (m3Match && m3Match[0] !== row.doca && m3Match[0] !== row.nfNo.substring(0,3)) {
-            row.m3 = m3Match[0];
-          }
-
-          // Tentar extrair Destino (Palavras com mais de 4 letras capitalizadas)
-          const words = line.split(/[\s,;]+/).filter(w => w.length > 4 && /^[A-Z]/.test(w));
-          if (words.length > 0) {
-            // Pega a primeira palavra longa que não seja a placa ou o responsável
-            const filteredWords = words.filter(w => !plateMatches?.some(p => p.includes(w)) && !['VINI', 'DOUGLAS', 'JEFF', 'PEDRO'].includes(w.toUpperCase()));
-            if (filteredWords.length > 0) row.destino = filteredWords[0];
-          }
-
-          // Responsável
-          const grNames = ['jeff', 'vini', 'douglas', 'ulisses', 'pedro', 'rayson', 'rn'];
-          for (const name of grNames) {
-            if (line.toLowerCase().includes(name)) {
-              row.responsavel = name.toUpperCase();
-              row.preAlertaGr = name.toUpperCase();
-              break;
-            }
-          }
-
-          // Data e Hora - Mais flexível (espaços, barras, etc)
-          const dateMatch = line.match(/\d{2}[\s/\-]\d{2}/);
-          if (dateMatch) row.data = dateMatch[0].replace(/\s/g, '/');
-          
-          const timeMatch = line.match(/\d{2}[:\s]\d{2}/);
-          if (timeMatch) row.hora = timeMatch[0].replace(/\s/g, ':');
-
-          // Valor NF (R$) - Procura por "R$" ou números com vírgula
-          const valorMatch = line.match(/R\$?\s?(\d+[\d,.]*)/i);
-          if (valorMatch) row.valorNf = 'R$ ' + valorMatch[1];
-
-          extractedRows.push(row);
-        }
-      });
-
-      // Se não encontrou nada estruturado por linha, tenta a busca global anterior para iscas
-      if (extractedRows.length === 0) {
-        const matches = text.match(/\b\d{4,12}\b/g) || [];
-        const extractedNumbers = [...new Set(matches)];
-        
-        if (extractedNumbers.length > 0) {
-          extractedNumbers.forEach(num => {
-            const row = createEmptyRow();
-            row.iscaNo = num;
-            extractedRows.push(row);
-          });
-        }
-      }
+      console.log("Processing OCR slices with Gemini...");
+      const resultsBySlice = await Promise.all(slices.map(processOcrSlice));
       
+      // Juntar todos os resultados
+      const extractedRows = resultsBySlice.flat();
+      
+      console.log(`OCR finished. Extracted ${extractedRows.length} rows.`);
+
       if (extractedRows.length > 0) {
-        // Remove linhas iniciais se forem as 10 vazias padrão e o usuário está começando agora
+        // Remove linhas iniciais vazias se o usuário está começando agora
         let baseRows = rows;
         if (rows.length === INITIAL_ROWS_COUNT && rows.every(r => !r.iscaNo && !r.cavalo)) {
           baseRows = [];
@@ -170,12 +127,13 @@ export default function App() {
       }
     } catch (error) {
       console.error("Erro ao escanear imagem:", error);
-      alert("Erro ao processar a imagem. Verifique sua conexão e tente novamente.");
+      alert("Erro ao processar a imagem com a IA. Verifique sua conexão e tente novamente.");
     } finally {
       setIsScanning(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
+
 
   useEffect(() => {
     const saved = localStorage.getItem('isca_rows');
