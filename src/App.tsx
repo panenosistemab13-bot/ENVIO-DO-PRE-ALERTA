@@ -61,14 +61,15 @@ export default function App() {
       const extractedRows: RowData[] = [];
 
       lines.forEach(line => {
-        // Busca por número de isca (principal identificador)
-        const iscaMatch = line.match(/\b\d{4,12}\b/);
+        // Busca por número de isca (principal identificador) - Ex: R100000876 ou 100000876
+        const iscaMatch = line.match(/\b[R]?\d{7,12}\b/i);
         if (iscaMatch) {
           const row = createEmptyRow();
-          row.iscaNo = iscaMatch[0];
+          row.iscaNo = iscaMatch[0].toUpperCase();
           
           // Tentar extrair Placas (Cavalo/Carreta) - Formato Mercosul ou Antigo
-          const plateMatches = line.match(/[A-Z]{3}-?\d[A-Z\d]\d{2}/gi);
+          // Ex: RYB7G26, MEM4453, ABC-1234
+          const plateMatches = line.match(/[A-Z]{3}-?\d[A-Z\d]\d{2}/gi) || line.match(/[A-Z]{3}-?\d{4}/gi);
           if (plateMatches && plateMatches.length >= 1) {
             row.cavalo = plateMatches[0].toUpperCase().replace(/-/g, '');
             if (plateMatches.length >= 2) {
@@ -76,38 +77,64 @@ export default function App() {
             }
           }
 
-          // Tentar extrair Doca (procurando por "Doca" ou números isolados pequenos)
-          const docaMatch = line.match(/doca[:\s]*(\d{1,2})/i);
-          if (docaMatch) {
-            row.doca = docaMatch[1].padStart(2, '0');
+          // Tentar extrair Doca (procurando por "Doca" ou números isolados pequenos de 2 dígitos)
+          const docaMatch = line.match(/doca[:\s]*(\d{1,2})/i) || line.match(/\b\d{1,2}\b/);
+          if (docaMatch && !line.includes(docaMatch[0] + '/')) { // Evita pegar parte da data
+            row.doca = docaMatch[1] ? docaMatch[1].padStart(2, '0') : docaMatch[0].padStart(2, '0');
           }
 
-          // Tentar extrair NF (procurando por "NF" ou números de ~6 a 9 dígitos)
-          const nfMatch = line.match(/nf[:\s]*(\d{5,9})/i);
+          // Tentar extrair NF (procurando por números de 7 dígitos próximos a "NF" ou isolados)
+          const nfMatch = line.match(/nf[:\s]*(\d{5,9})/i) || line.match(/\b\d{7}\b/);
           if (nfMatch) {
-            row.nfNo = nfMatch[1];
+            row.nfNo = nfMatch[1] || nfMatch[0];
           }
 
-          // Tentar extrair PRÉ-ALERTA GR (nomes comuns)
-          const grNames = ['jeff', 'vini', 'douglas', 'ulisses', 'pedro', 'rayson'];
+          // Tentar extrair Produto (8 dígitos)
+          const produtoMatch = line.match(/\b\d{8}\b/);
+          if (produtoMatch && produtoMatch[0] !== row.nfNo) {
+            row.produto = produtoMatch[0];
+          }
+
+          // Tentar extrair UMA (sequências longas ou com espaços/pontos)
+          const umaMatch = line.match(/\d{2,3}[\s.]\d{3}[\s.]\d{3}[\s.]\d{3}/) || line.match(/\b\d{10,12}\b/);
+          if (umaMatch) {
+            row.uma = umaMatch[0].replace(/\s/g, '.');
+          }
+
+          // Tentar extrair M³ (geralmente 3 dígitos)
+          const m3Match = line.match(/\b\d{3}\b/);
+          if (m3Match && m3Match[0] !== row.doca && m3Match[0] !== row.nfNo.substring(0,3)) {
+            row.m3 = m3Match[0];
+          }
+
+          // Tentar extrair Destino (Palavras com mais de 4 letras capitalizadas)
+          const words = line.split(/[\s,;]+/).filter(w => w.length > 4 && /^[A-Z]/.test(w));
+          if (words.length > 0) {
+            // Pega a primeira palavra longa que não seja a placa ou o responsável
+            const filteredWords = words.filter(w => !plateMatches?.some(p => p.includes(w)) && !['VINI', 'DOUGLAS', 'JEFF', 'PEDRO'].includes(w.toUpperCase()));
+            if (filteredWords.length > 0) row.destino = filteredWords[0];
+          }
+
+          // Responsável
+          const grNames = ['jeff', 'vini', 'douglas', 'ulisses', 'pedro', 'rayson', 'rn'];
           for (const name of grNames) {
             if (line.toLowerCase().includes(name)) {
-              row.preAlertaGr = name.charAt(0).toUpperCase() + name.slice(1);
+              row.responsavel = name.toUpperCase();
+              row.preAlertaGr = name.toUpperCase();
               break;
             }
           }
 
-          // Tentar extrair UMA (procurando por sequências longas pontuadas)
-          const umaMatch = line.match(/\d{3}\.\d{3}\.\d{3}\.\d{3}/) || line.match(/\d{12}/);
-          if (umaMatch) {
-            row.uma = umaMatch[0];
-          }
+          // Data e Hora - Mais flexível (espaços, barras, etc)
+          const dateMatch = line.match(/\d{2}[\s/\-]\d{2}/);
+          if (dateMatch) row.data = dateMatch[0].replace(/\s/g, '/');
+          
+          const timeMatch = line.match(/\d{2}[:\s]\d{2}/);
+          if (timeMatch) row.hora = timeMatch[0].replace(/\s/g, ':');
 
-          // Data e Hora se houver na linha
-          const dateMatch = line.match(/\d{2}\/\d{2}/);
-          if (dateMatch) row.data = dateMatch[0];
-          const timeMatch = line.match(/\d{2}:\d{2}/);
-          if (timeMatch) row.hora = timeMatch[0];
+          // Valor NF (R$) - Procura por "R$" ou números com vírgula
+          const valorMatch = line.match(/R\$?\s?(\d+[\d,.]*)/i);
+          if (valorMatch) row.valorNf = 'R$ ' + valorMatch[1];
 
           extractedRows.push(row);
         }
