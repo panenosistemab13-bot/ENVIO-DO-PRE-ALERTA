@@ -6,7 +6,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Trash2, Download, Save, FileSpreadsheet, ChevronLeft, ChevronRight, Loader2, ClipboardList, Table, LayoutDashboard, ArrowLeft, Camera, TrendingUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import Tesseract from 'tesseract.js';
 import { RowData, COLUMNS } from './types';
 import PreAlerta from './components/PreAlerta';
 import Stats from './components/Stats';
@@ -49,101 +48,111 @@ export default function App() {
 
     setIsScanning(true);
     try {
-      const { data } = await Tesseract.recognize(file, 'por', {
-        logger: m => console.log(m.status, (m.progress * 100).toFixed(2) + "%")
+      // 1. Redimensionar a imagem para otimizar o envio
+      const resizeImage = (file: File): Promise<string> => {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => {
+              const canvas = document.createElement('canvas');
+              let width = img.width;
+              let height = img.height;
+              const maxDimension = 1200;
+
+              if (width > height) {
+                if (width > maxDimension) {
+                  height *= maxDimension / width;
+                  width = maxDimension;
+                }
+              } else {
+                if (height > maxDimension) {
+                  width *= maxDimension / height;
+                  height = maxDimension;
+                }
+              }
+
+              canvas.width = width;
+              canvas.height = height;
+              const ctx = canvas.getContext('2d');
+              ctx?.drawImage(img, 0, 0, width, height);
+              resolve(canvas.toDataURL('image/jpeg', 0.7));
+            };
+            img.onerror = reject;
+            img.src = e.target?.result as string;
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+      };
+
+      const resizedBase64Full = await resizeImage(file);
+      const base64 = resizedBase64Full.split(',')[1];
+
+      const response = await fetch('https://text.pollinations.ai/openai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [
+            {
+              role: "user",
+              content: [
+                { 
+                  type: 'text', 
+                  text: "Você é um assistente de logística especialista em OCR. Analise esta imagem manuscrita (uma prancheta de controle de embarque) e extraia os dados de todas as colunas preenchidas. As colunas esperadas são: Nº Isca (sempre começa com R), Data, Hora, Doca, Cavalo, Carreta, M³, Destino, Nº NF, Responsável e Produto. Retorne APENAS um array JSON puro de objetos com as seguintes chaves (se o dado não existir, retorne string vazia): iscaNo, data, hora, doca, cavalo, carreta, m3, destino, nfNo, responsavel, produto. Exemplo: [{\"iscaNo\": \"R123\", \"doca\": \"04\", ...}]. Não inclua explicações, apenas o JSON puro." 
+                },
+                { type: 'image_url', image_url: { url: resizedBase64Full } }
+              ]
+            }
+          ],
+          model: "p1"
+        })
       });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("API Response Error:", errorText);
+        throw new Error(`Erro na API (${response.status})`);
+      }
       
-      const text = data.text;
-      console.log("OCR finished. Raw text length:", text.length);
-
-      // Tentar processar por linhas para capturar dados relacionados
-      const lines = text.split('\n').filter(l => l.trim().length > 0);
-      const extractedRows: RowData[] = [];
-
-      lines.forEach(line => {
-        // Busca por número de isca (principal identificador)
-        const iscaMatch = line.match(/\b\d{4,12}\b/);
-        if (iscaMatch) {
-          const row = createEmptyRow();
-          row.iscaNo = iscaMatch[0];
-          
-          // Tentar extrair Placas (Cavalo/Carreta) - Formato Mercosul ou Antigo
-          const plateMatches = line.match(/[A-Z]{3}-?\d[A-Z\d]\d{2}/gi);
-          if (plateMatches && plateMatches.length >= 1) {
-            row.cavalo = plateMatches[0].toUpperCase().replace(/-/g, '');
-            if (plateMatches.length >= 2) {
-              row.carreta = plateMatches[1].toUpperCase().replace(/-/g, '');
-            }
+      const textResponse = await response.text();
+      // Limpeza de possíveis blocos de código markdown
+      const cleanedJson = textResponse.replace(/```json/g, '').replace(/```/g, '').trim();
+      
+      let extractedData: any[] = [];
+      try {
+        extractedData = JSON.parse(cleanedJson);
+      } catch (e) {
+        console.error("Erro ao parsear JSON da IA:", textResponse);
+        // Fallback: Tenta encontrar o JSON dentro do texto se houver lixo em volta
+        const jsonMatch = cleanedJson.match(/\[\s*\{.*\}\s*\]/s);
+        if (jsonMatch) {
+          try {
+            extractedData = JSON.parse(jsonMatch[0]);
+          } catch {
+            alert("Não foi possível processar a resposta da IA de forma estruturada.");
           }
-
-          // Tentar extrair Doca (procurando por "Doca" ou números isolados pequenos)
-          const docaMatch = line.match(/doca[:\s]*(\d{1,2})/i);
-          if (docaMatch) {
-            row.doca = docaMatch[1].padStart(2, '0');
-          }
-
-          // Tentar extrair NF (procurando por "NF" ou números de ~6 a 9 dígitos)
-          const nfMatch = line.match(/nf[:\s]*(\d{5,9})/i);
-          if (nfMatch) {
-            row.nfNo = nfMatch[1];
-          }
-
-          // Tentar extrair PRÉ-ALERTA GR (nomes comuns)
-          const grNames = ['jeff', 'vini', 'douglas', 'ulisses', 'pedro', 'rayson'];
-          for (const name of grNames) {
-            if (line.toLowerCase().includes(name)) {
-              row.preAlertaGr = name.charAt(0).toUpperCase() + name.slice(1);
-              break;
-            }
-          }
-
-          // Tentar extrair UMA (procurando por sequências longas pontuadas)
-          const umaMatch = line.match(/\d{3}\.\d{3}\.\d{3}\.\d{3}/) || line.match(/\d{12}/);
-          if (umaMatch) {
-            row.uma = umaMatch[0];
-          }
-
-          // Data e Hora se houver na linha
-          const dateMatch = line.match(/\d{2}\/\d{2}/);
-          if (dateMatch) row.data = dateMatch[0];
-          const timeMatch = line.match(/\d{2}:\d{2}/);
-          if (timeMatch) row.hora = timeMatch[0];
-
-          extractedRows.push(row);
-        }
-      });
-
-      // Se não encontrou nada estruturado por linha, tenta a busca global anterior para iscas
-      if (extractedRows.length === 0) {
-        const matches = text.match(/\b\d{4,12}\b/g) || [];
-        const extractedNumbers = [...new Set(matches)];
-        
-        if (extractedNumbers.length > 0) {
-          extractedNumbers.forEach(num => {
-            const row = createEmptyRow();
-            row.iscaNo = num;
-            extractedRows.push(row);
-          });
         }
       }
       
-      if (extractedRows.length > 0) {
-        // Remove linhas iniciais se forem as 10 vazias padrão e o usuário está começando agora
-        let baseRows = rows;
-        if (rows.length === INITIAL_ROWS_COUNT && rows.every(r => !r.iscaNo && !r.cavalo)) {
-          baseRows = [];
-        }
-
-        const updatedRows = [...extractedRows, ...baseRows];
+      if (Array.isArray(extractedData) && extractedData.length > 0) {
+        const newRows = extractedData.map(item => ({
+          ...createEmptyRow(),
+          ...item,
+          iscaNo: (item.iscaNo || '').toString().toUpperCase(),
+          id: crypto.randomUUID()
+        }));
+        
+        const updatedRows = [...newRows, ...rows];
         setRows(updatedRows);
         saveToLocalStorage(updatedRows);
         setCurrentView('main');
       } else {
-        alert("Nenhum dado legível foi encontrado na imagem. Tente tirar a foto mais de perto e com boa iluminação.");
+        alert("Nenhum dado legível foi encontrado na imagem da prancheta.");
       }
     } catch (error) {
       console.error("Erro ao escanear imagem:", error);
-      alert("Erro ao processar a imagem. Verifique sua conexão e tente novamente.");
+      alert("Erro ao processar a imagem com IA. Verifique sua conexão e tente novamente.");
     } finally {
       setIsScanning(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -457,6 +466,29 @@ export default function App() {
           </div>
           
           <div className="flex items-center gap-2 overflow-x-auto pb-1 w-full md:w-auto justify-center md:justify-end">
+
+
+            <button 
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md transition-colors text-sm font-medium whitespace-nowrap"
+            >
+              <Camera size={16} /> Escanear
+            </button>
+
+            <button 
+              onClick={() => setCurrentView('stats')}
+              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-md transition-colors text-sm font-medium whitespace-nowrap"
+            >
+              <TrendingUp size={16} /> Relatórios
+            </button>
+
+            <button 
+              onClick={() => setCurrentView('pre-alerta')}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md transition-colors text-sm font-medium whitespace-nowrap"
+            >
+              <ClipboardList size={16} /> Pré-Alerta
+            </button>
+
             <button 
               onClick={addRow}
               className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md transition-colors text-sm font-medium whitespace-nowrap"

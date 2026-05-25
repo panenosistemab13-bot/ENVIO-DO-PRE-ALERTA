@@ -26,6 +26,8 @@ export const COLUMNS = [
     id: 'doca', 
     label: 'DOCA', 
     width: 'w-12', 
+    type: 'select', 
+    options: ['', '04', '05', '06', '07', '08', '09', '10', '11', '12', '13', '14', '15'] 
   },
   { id: 'cavalo', label: 'CAVALO', width: 'w-20' },
   { id: 'carreta', label: 'CARRETA', width: 'w-24' },
@@ -40,6 +42,8 @@ export const COLUMNS = [
     id: 'preAlertaGr', 
     label: 'PRÉ-ALERTA GR', 
     width: 'w-32', 
+    type: 'select', 
+    options: ['', 'Jeff', 'vini', 'douglas', 'ulisses', 'pedro', 'Rayson'] 
   },
   { id: 'planCarreg', label: 'PLAN. CARREG', width: 'w-24', type: 'checkbox' },
   { id: 'baixaGr', label: 'BAIXA GR', width: 'w-24', type: 'checkbox' },
